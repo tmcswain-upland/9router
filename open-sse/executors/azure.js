@@ -17,6 +17,11 @@ export class AzureExecutor extends DefaultExecutor {
 
     const endpoint = azureEndpoint.replace(/\/$/, "");
 
+    // Azure AI Foundry /openai/v1 endpoint (standard OpenAI compatibility route, no api-version query param)
+    if (endpoint.includes("/openai/v1")) {
+      return `${endpoint}/chat/completions`;
+    }
+
     // Azure AI Foundry / Serverless Model Inference (e.g. services.ai.azure.com/models or models.ai.azure.com)
     if (endpoint.includes("/models") || endpoint.includes("services.ai.azure.com") || endpoint.includes("models.ai.azure.com")) {
       const apiVersion = credentials?.providerSpecificData?.apiVersion
