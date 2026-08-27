@@ -10,16 +10,25 @@ export class AzureExecutor extends DefaultExecutor {
       || process.env.AZURE_ENDPOINT
       || "https://api.openai.com";
 
-    const apiVersion = credentials?.providerSpecificData?.apiVersion
-      || process.env.AZURE_API_VERSION
-      || "2024-10-01-preview";
-
     const deployment = credentials?.providerSpecificData?.deployment
       || model
       || process.env.AZURE_DEPLOYMENT
       || "gpt-4";
 
     const endpoint = azureEndpoint.replace(/\/$/, "");
+
+    // Azure AI Foundry / Serverless Model Inference (e.g. services.ai.azure.com/models or models.ai.azure.com)
+    if (endpoint.includes("/models") || endpoint.includes("services.ai.azure.com") || endpoint.includes("models.ai.azure.com")) {
+      const apiVersion = credentials?.providerSpecificData?.apiVersion
+        || process.env.AZURE_API_VERSION
+        || "2024-05-01-preview";
+      return `${endpoint}/chat/completions?api-version=${apiVersion}`;
+    }
+
+    // Azure OpenAI standard endpoint (e.g. *.openai.azure.com)
+    const apiVersion = credentials?.providerSpecificData?.apiVersion
+      || process.env.AZURE_API_VERSION
+      || "2024-10-01-preview";
     return `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
   }
 
@@ -35,6 +44,12 @@ export class AzureExecutor extends DefaultExecutor {
 
     if (apiKey) {
       headers["api-key"] = apiKey;
+      headers["Authorization"] = `Bearer ${apiKey}`;
+    }
+
+    const deployment = credentials?.providerSpecificData?.deployment;
+    if (deployment) {
+      headers["azureml-model-deployment"] = deployment;
     }
 
     const organization = credentials?.providerSpecificData?.organization
@@ -52,6 +67,26 @@ export class AzureExecutor extends DefaultExecutor {
   }
 
   transformRequest(model, body, stream, credentials) {
-    return body;
+    const transformed = { ...body };
+
+    // Azure OpenAI strictly rejects vendor/Anthropic thinking parameters
+    delete transformed.thinking;
+    delete transformed.thinking_budget;
+    delete transformed.output_config;
+    delete transformed.enable_thinking;
+
+    // Convert max_tokens -> max_completion_tokens for Azure endpoints
+    if (transformed.max_tokens !== undefined) {
+      transformed.max_completion_tokens = transformed.max_tokens;
+      delete transformed.max_tokens;
+    }
+    if (transformed.tools && Array.isArray(transformed.tools) && transformed.tools.length > 128) {
+      transformed.tools = transformed.tools.slice(0, 128);
+    }
+    // In Azure /chat/completions, function tools with reasoning_effort are rejected
+    if (transformed.tools && Array.isArray(transformed.tools) && transformed.tools.length > 0) {
+      delete transformed.reasoning_effort;
+    }
+    return transformed;
   }
 }

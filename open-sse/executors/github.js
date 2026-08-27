@@ -105,6 +105,10 @@ export class GithubExecutor extends BaseExecutor {
     if (transformed.reasoning_effort === "none") {
       delete transformed.reasoning_effort;
     }
+    // Kimi models (e.g. kimi-k3) on GitHub Models only support [low, high, max]
+    if (/kimi/i.test(model) && transformed.reasoning_effort === "medium") {
+      transformed.reasoning_effort = "high";
+    }
     // Config-driven strip of params unsupported by this provider/model
     stripUnsupportedParams("github", model, transformed);
     return transformed;

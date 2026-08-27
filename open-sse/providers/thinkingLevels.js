@@ -9,7 +9,8 @@ const L = {
   base: ["none", "low", "medium", "high"],                          // qwen, step, hunyuan, gemini-budget
   onOff: ["none", "thinking"],                                      // zai (binary), minimax (adaptive)
   openai: ["none", "minimal", "low", "medium", "high", "xhigh"],    // GPT-5.x / o-series (no "max")
-  levelMax: ["none", "low", "medium", "high", "max"],               // claude-adaptive, kimi
+  levelMax: ["none", "low", "medium", "high", "max"],               // claude-adaptive
+  kimi: ["none", "low", "high", "max"],                             // kimi (supported: low, high, max)
   budgetX: ["none", "low", "medium", "high", "xhigh", "max"],       // claude-budget
   gemini: ["minimal", "low", "medium", "high"],                     // gemini-3 thinkingLevel (no disable)
   hiMax: ["none", "high", "max"],                                   // deepseek (low/med→high, xhigh→max)
@@ -24,7 +25,7 @@ const FORMAT_LEVELS = {
   "gemini-budget": L.base,
   zai: L.onOff,
   qwen: L.base,
-  kimi: L.levelMax,
+  kimi: L.kimi,
   deepseek: L.hiMax,
   minimax: L.onOff,
   hunyuan: L.base,

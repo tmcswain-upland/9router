@@ -77,11 +77,23 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     }
 
     // Filter out model-locked and excluded connections
-    const availableConnections = connections.filter(c => {
+    let availableConnections = connections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
       return true;
     });
+
+    // Azure: Route to connection matching deployment / model name if available
+    if (providerId === "azure" && model) {
+      const modelLower = model.toLowerCase();
+      const exactMatching = availableConnections.filter(c => {
+        const d = c.providerSpecificData?.deployment || c.connectionName;
+        return d && d.toLowerCase() === modelLower;
+      });
+      if (exactMatching.length > 0) {
+        availableConnections = exactMatching;
+      }
+    }
 
     log.debug("AUTH", `${provider} | available: ${availableConnections.length}/${connections.length}`);
     connections.forEach(c => {

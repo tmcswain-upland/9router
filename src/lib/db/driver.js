@@ -20,8 +20,16 @@ async function tryBetterSqlite() {
   // Skip on Bun — better-sqlite3 native bindings unsupported
   if (process.versions.bun) return null;
   try {
-    const { createBetterSqliteAdapter } = await import("./adapters/betterSqliteAdapter.js");
-    return createBetterSqliteAdapter(DATA_FILE);
+    const { createRequire } = await import("module");
+    const require = createRequire(import.meta.url);
+    require.resolve("better-sqlite3");
+  } catch {
+    return null;
+  }
+  try {
+    const mod = "./adapters/betterSqliteAdapter.js";
+    const { createBetterSqliteAdapter } = await import(mod);
+    return await createBetterSqliteAdapter(DATA_FILE);
   } catch (e) {
     console.warn(`[DB] better-sqlite3 unavailable: ${e.message}`);
     return null;
@@ -56,10 +64,10 @@ async function initAdapter() {
   ensureDirs();
   // Order per runtime:
   //   Bun:  bun:sqlite → sql.js
-  //   Node: better-sqlite3 → node:sqlite (≥22.5) → sql.js
+  //   Node: node:sqlite (≥22.5) → better-sqlite3 → sql.js
   let adapter = await tryBunSqlite();
-  if (!adapter) adapter = await tryBetterSqlite();
   if (!adapter) adapter = await tryNodeSqlite();
+  if (!adapter) adapter = await tryBetterSqlite();
   if (!adapter) adapter = await trySqlJs();
   if (!adapter) throw new Error("[DB] No SQLite driver available (bun/better/node/sql.js all failed)");
 

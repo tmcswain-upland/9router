@@ -18,9 +18,14 @@ export function claudeToOpenAIRequest(model, body, stream) {
     stream: stream
   };
 
-  // Max tokens
+  // Max tokens (OpenAI o-series & gpt-5+ require max_completion_tokens)
   if (body.max_tokens) {
-    result.max_tokens = adjustMaxTokens(body);
+    const tokens = adjustMaxTokens(body);
+    if (/gpt-5|o[134]-|o[134]$|codex/i.test(model)) {
+      result.max_completion_tokens = tokens;
+    } else {
+      result.max_tokens = tokens;
+    }
   }
 
   // Temperature
@@ -65,7 +70,7 @@ export function claudeToOpenAIRequest(model, body, stream) {
 
   // Tools
   if (body.tools && Array.isArray(body.tools)) {
-    result.tools = body.tools.map(tool => ({
+    const rawTools = body.tools.map(tool => ({
       type: OPENAI_BLOCK.FUNCTION,
       function: {
         name: tool.name,
@@ -73,6 +78,7 @@ export function claudeToOpenAIRequest(model, body, stream) {
         parameters: tool.input_schema || { type: "object", properties: {} }
       }
     }));
+    result.tools = rawTools.length > 128 ? rawTools.slice(0, 128) : rawTools;
   }
 
   // Tool choice

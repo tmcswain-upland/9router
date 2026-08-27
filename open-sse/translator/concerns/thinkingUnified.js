@@ -109,6 +109,10 @@ export const captureThinking = extractThinking;
 function resolveFormat(targetFormat, model, provider) {
   const providerFmt = provider ? PROVIDERS[provider]?.thinkingFormat : null;
   if (providerFmt) return providerFmt;
+  if (targetFormat === "openai" || provider === "azure" || provider === "openai") {
+    // Azure and OpenAI endpoints only accept OpenAI reasoning format (reasoning_effort), never vendor-custom body.thinking
+    return "openai";
+  }
   const caps = getCapabilitiesForModel(provider, model);
   if (caps.thinkingFormat) return caps.thinkingFormat;
   return FORMAT_TO_NATIVE[targetFormat] || "openai";
@@ -150,11 +154,11 @@ function toGeminiThinkingLevel(cfg) {
 
 function toKimiReasoningEffort(cfg) {
   const level = toLevel(cfg);
-  if (level === "auto") return "high";
+  if (level === "auto" || level === "medium") return "high";
   if (level === "minimal") return "low";
-  if (level === "xhigh") return "max";
-  if (["low", "medium", "high", "max"].includes(level)) return level;
-  return null;
+  if (level === "xhigh" || level === "max") return "max";
+  if (["low", "high", "max"].includes(level)) return level;
+  return "high";
 }
 
 const GEMINI_LEVEL_OUTPUT_FLOOR = {

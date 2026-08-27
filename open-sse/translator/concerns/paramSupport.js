@@ -15,6 +15,8 @@ const STRIP_RULES = [
   // Cloudflare Workers AI: content must be plain string, rejects OpenAI content-part array (#1926)
   { provider: "cloudflare-ai", flattenContent: true },
   { provider: "volcengine-ark", match: /glm-5/i, clampToModelMaxOutput: true },
+  // Newer OpenAI models (gpt-5+, o1, o3, o4) reject max_tokens and require max_completion_tokens
+  { match: /gpt-5|o[134]-|o[134]$|codex/i, convertMaxCompletionTokens: true },
   // VolcEngine Ark caps the Kimi family at max_tokens <= 32768, but the model's
   // advertised ceiling is far higher (Kimi-K2.7-Code resolves to maxOutput 262144),
   // so clampToModelMaxOutput alone leaves it uncapped and the request 400s with
@@ -43,6 +45,10 @@ export function stripUnsupportedParams(provider, model, body) {
     if (!matches(rule, model)) continue;
     for (const key of rule.drop || []) {
       if (body[key] !== undefined) delete body[key];
+    }
+    if (rule.convertMaxCompletionTokens && body.max_tokens !== undefined) {
+      body.max_completion_tokens = body.max_tokens;
+      delete body.max_tokens;
     }
     // CF Workers AI oneOf root schema only accepts content as plain string (#1926)
     if (rule.flattenContent && Array.isArray(body.messages)) {

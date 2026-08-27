@@ -114,6 +114,36 @@ export function filterToOpenAIFormat(body, opts = {}) {
       
       return tool;
     }).flat();
+
+    // OpenAI & Azure OpenAI hard limit: max 128 tools in tools array
+    if (body.tools.length > 128) {
+      const usedToolNames = new Set();
+      if (Array.isArray(body.messages)) {
+        for (const msg of body.messages) {
+          if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+            for (const tc of msg.tool_calls) {
+              const name = tc.function?.name || tc.name;
+              if (name) usedToolNames.add(name);
+            }
+          }
+          if (msg.role === ROLE.TOOL && msg.name) {
+            usedToolNames.add(msg.name);
+          }
+        }
+      }
+
+      const used = [];
+      const rest = [];
+      for (const tool of body.tools) {
+        const name = tool.function?.name || tool.name;
+        if (name && usedToolNames.has(name)) {
+          used.push(tool);
+        } else {
+          rest.push(tool);
+        }
+      }
+      body.tools = [...used, ...rest].slice(0, 128);
+    }
   }
 
   // Normalize tool_choice to OpenAI format
@@ -127,6 +157,12 @@ export function filterToOpenAIFormat(body, opts = {}) {
     } else if (choice.type === "tool" && choice.name) {
       body.tool_choice = { type: OPENAI_BLOCK.FUNCTION, function: { name: choice.name } };
     }
+  }
+
+  // Convert max_tokens -> max_completion_tokens for models that require it (GPT-5, o-series, Codex)
+  if (body.model && /gpt-5|o[134]-|o[134]$|codex/i.test(body.model) && body.max_tokens !== undefined) {
+    body.max_completion_tokens = body.max_tokens;
+    delete body.max_tokens;
   }
 
   return body;
