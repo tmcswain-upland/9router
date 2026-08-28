@@ -74,6 +74,12 @@ export class AzureExecutor extends DefaultExecutor {
   transformRequest(model, body, stream, credentials) {
     const transformed = { ...body };
 
+    const deployment = credentials?.providerSpecificData?.deployment
+      || (typeof model === "string" ? model.replace(/^azure\//, "") : model)
+      || "gpt-4";
+
+    transformed.model = deployment;
+
     // Azure OpenAI strictly rejects vendor/Anthropic thinking parameters
     delete transformed.thinking;
     delete transformed.thinking_budget;

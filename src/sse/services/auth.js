@@ -83,15 +83,25 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       return true;
     });
 
-    // Azure: Route to connection matching deployment / model name if available
+    // Azure: Strictly route to connection matching deployment / model name
     if (providerId === "azure" && model) {
       const modelLower = model.toLowerCase();
       const exactMatching = availableConnections.filter(c => {
         const d = c.providerSpecificData?.deployment || c.connectionName;
-        return d && d.toLowerCase() === modelLower;
+        return d && (d.toLowerCase() === modelLower || d.toLowerCase().replace(/[-_.]/g, "") === modelLower.replace(/[-_.]/g, ""));
       });
       if (exactMatching.length > 0) {
         availableConnections = exactMatching;
+      } else {
+        // If there are connections configured for this model/deployment in the database,
+        // do not fall back to unrelated Azure models (e.g. do not send DeepSeek to gpt-5.6-luna)
+        const allMatching = connections.filter(c => {
+          const d = c.providerSpecificData?.deployment || c.connectionName;
+          return d && (d.toLowerCase() === modelLower || d.toLowerCase().replace(/[-_.]/g, "") === modelLower.replace(/[-_.]/g, ""));
+        });
+        if (allMatching.length > 0) {
+          availableConnections = [];
+        }
       }
     }
 
