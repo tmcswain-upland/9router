@@ -31,6 +31,7 @@ const nextConfig = {
   images: {
     unoptimized: true
   },
+  allowedDevOrigins: ["127.0.0.1", "localhost", "127.0.0.1:20128", "localhost:20128"],
   env: {},
   experimental: {
     // #1529/#1572: LLM clients can send long context or base64 image payloads through /v1 rewrites.
