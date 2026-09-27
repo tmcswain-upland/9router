@@ -29,6 +29,7 @@ import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
 import { prefetchRemoteImages } from "../translator/concerns/prefetch.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
+import { supportsAzureResponsesV1 } from "../services/azureResponses.js";
 
 /**
  * Core chat handler - shared between SSE and Worker
@@ -90,7 +91,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // differ — kimi/glm only do /chat/completions). Undeclared models keep the
   // upstream default (use the transport), preserving behavior for glm/deepseek/...
   const useTransport = (!modelSupportedFormats || modelSupportedFormats.includes(sourceFormat)) ? runtimeTransport : null;
-  const targetFormat = modelTargetFormat || useTransport?.format || getTargetFormat(provider, credentials);
+  const nativeAzureResponses = provider === "azure" && sourceFormat === FORMATS.OPENAI_RESPONSES && supportsAzureResponsesV1(credentials);
+  const targetFormat = nativeAzureResponses
+    ? FORMATS.OPENAI_RESPONSES
+    : modelTargetFormat || useTransport?.format || getTargetFormat(provider, credentials);
   if (useTransport && credentials) credentials.runtimeTransport = useTransport;
   const stripList = getModelStrip(alias, model);
   const upstreamModel = getModelUpstreamId(alias, model);
@@ -140,10 +144,10 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   reqLogger.logRawRequest(body);
   log?.debug?.("FORMAT", `${sourceFormat} → ${targetFormat} | stream=${stream}`);
 
-  // Native passthrough: CLI tool and provider are the same ecosystem
-  // Skip all translation/normalization — only model and Bearer are swapped
+  // Native passthrough covers same-ecosystem CLIs plus Azure v1 Responses.
+  // Skip format translation/normalization; the executor handles the model name.
   const clientTool = detectClientTool(clientRawRequest?.headers || {}, body);
-  const passthrough = isNativePassthrough(clientTool, provider);
+  const passthrough = nativeAzureResponses || isNativePassthrough(clientTool, provider);
 
   // Expose raw client headers to translators/executors for session-id resolution
   if (credentials) credentials.rawHeaders = clientRawRequest?.headers || {};
@@ -165,7 +169,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   let toolNameMap;
   let customToolNames;
   if (passthrough) {
-    log?.debug?.("PASSTHROUGH", `${clientTool} → ${provider} | native lossless`);
+    log?.debug?.("PASSTHROUGH", nativeAzureResponses
+      ? "openai-responses → azure v1 | native lossless"
+      : `${clientTool} → ${provider} | native lossless`);
     translatedBody = { ...body, model: stripThinkingSuffix(upstreamModel) };
     if (provider === "codex") {
       const suffixThinking = {};
@@ -209,12 +215,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   const finalFormat = passthrough ? sourceFormat : targetFormat;
 
   // Cap tools array to 128 for OpenAI/Azure targets to prevent 400 'Invalid tools: array too long'
-  if ((finalFormat === "openai" || provider === "azure" || provider === "openai") && Array.isArray(translatedBody.tools) && translatedBody.tools.length > 128) {
+  const isAzureChatCompletionsRequest = provider === "azure" && targetFormat === FORMATS.OPENAI;
+  if ((finalFormat === FORMATS.OPENAI || isAzureChatCompletionsRequest || provider === "openai") && Array.isArray(translatedBody.tools) && translatedBody.tools.length > 128) {
     translatedBody.tools = translatedBody.tools.slice(0, 128);
   }
 
   // For gpt-5, o-series, and codex models on OpenAI targets, ensure max_tokens -> max_completion_tokens
-  if ((finalFormat === "openai" || provider === "azure" || provider === "openai" || provider === "github") &&
+  if ((finalFormat === FORMATS.OPENAI || isAzureChatCompletionsRequest || provider === "openai" || provider === "github") &&
       translatedBody.model && /gpt-5|o[134]-|o[134]$|codex/i.test(translatedBody.model) &&
       translatedBody.max_tokens !== undefined) {
     translatedBody.max_completion_tokens = translatedBody.max_tokens;
@@ -222,7 +229,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   }
 
   // For Azure and OpenAI targets, strip non-OpenAI thinking fields
-  if (finalFormat === "openai" || provider === "azure" || provider === "openai") {
+  if (finalFormat === FORMATS.OPENAI || isAzureChatCompletionsRequest || provider === "openai") {
     delete translatedBody.thinking;
     delete translatedBody.thinking_budget;
     delete translatedBody.output_config;
@@ -371,7 +378,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // exception: it is decoded by the executor into OpenAI-compatible output.
   let providerResponseFormat = targetFormat;
   try {
-    const result = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions });
+    const result = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions, requestFormat: targetFormat });
     providerResponse = result.response;
     providerUrl = result.url;
     providerHeaders = result.headers;
@@ -425,7 +432,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
           try { await onCredentialsRefreshed(newCredentials); } catch (e) { log?.warn?.("TOKEN", `onCredentialsRefreshed failed: ${e.message}`); }
         }
         try {
-          const retryResult = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions });
+          const retryResult = await executor.execute({ model, body: translatedBody, stream, credentials, signal: streamController.signal, log, proxyOptions, requestFormat: targetFormat });
           if (retryResult.response.ok) {
             providerResponse = retryResult.response;
             providerUrl = retryResult.url;

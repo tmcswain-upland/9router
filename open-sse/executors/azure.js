@@ -1,11 +1,13 @@
 import { DefaultExecutor } from "./default.js";
+import { supportsAzureResponsesV1 } from "../services/azureResponses.js";
+import { FORMATS } from "../translator/formats.js";
 
 export class AzureExecutor extends DefaultExecutor {
   constructor() {
     super("azure");
   }
 
-  buildUrl(model, stream, urlIndex = 0, credentials = null) {
+  buildUrl(model, stream, urlIndex = 0, credentials = null, requestFormat = null) {
     const azureEndpoint = credentials?.providerSpecificData?.azureEndpoint
       || process.env.AZURE_ENDPOINT
       || "https://api.openai.com";
@@ -16,6 +18,12 @@ export class AzureExecutor extends DefaultExecutor {
       || "gpt-4";
 
     const endpoint = azureEndpoint.replace(/\/$/, "");
+
+    if (requestFormat === FORMATS.OPENAI_RESPONSES && supportsAzureResponsesV1(credentials)) {
+      return endpoint.toLowerCase().endsWith("/openai/v1")
+        ? `${endpoint}/responses`
+        : `${endpoint}/openai/v1/responses`;
+    }
 
     // Azure AI Foundry /openai/v1 endpoint (standard OpenAI compatibility route, no api-version query param)
     if (endpoint.includes("/openai/v1")) {
@@ -37,23 +45,32 @@ export class AzureExecutor extends DefaultExecutor {
     return `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
   }
 
-  buildHeaders(credentials, stream = true) {
+  buildHeaders(credentials, stream = true, url, model, requestFormat = null) {
     const headers = {
       "Content-Type": "application/json",
       ...this.config.headers
     };
 
-    const apiKey = credentials?.apiKey
-      || credentials?.accessToken
-      || process.env.OPENAI_API_KEY;
-
-    if (apiKey) {
-      headers["api-key"] = apiKey;
-      headers["Authorization"] = `Bearer ${apiKey}`;
+    const nativeResponsesV1 = requestFormat === FORMATS.OPENAI_RESPONSES && supportsAzureResponsesV1(credentials);
+    if (nativeResponsesV1) {
+      // Azure v1 uses the connection's api-key header. Never fall back to a
+      // personal OpenAI key or an access token for this native request.
+      for (const key of Object.keys(headers)) {
+        if (["authorization", "api-key"].includes(key.toLowerCase())) delete headers[key];
+      }
+      if (credentials?.apiKey) headers["api-key"] = credentials.apiKey;
+    } else {
+      const apiKey = credentials?.apiKey
+        || credentials?.accessToken
+        || process.env.OPENAI_API_KEY;
+      if (apiKey) {
+        headers["api-key"] = apiKey;
+        headers["Authorization"] = `Bearer ${apiKey}`;
+      }
     }
 
     const deployment = credentials?.providerSpecificData?.deployment;
-    if (deployment) {
+    if (deployment && !nativeResponsesV1) {
       headers["azureml-model-deployment"] = deployment;
     }
 
@@ -71,7 +88,7 @@ export class AzureExecutor extends DefaultExecutor {
     return headers;
   }
 
-  transformRequest(model, body, stream, credentials) {
+  transformRequest(model, body, stream, credentials, requestFormat = null) {
     const transformed = { ...body };
 
     const deployment = credentials?.providerSpecificData?.deployment
@@ -79,6 +96,13 @@ export class AzureExecutor extends DefaultExecutor {
       || "gpt-4";
 
     transformed.model = deployment;
+
+    // The native Responses endpoint accepts the Responses request shape as-is.
+    // Keep response-only fields intact and only replace the client model alias
+    // with the configured Azure deployment name.
+    if (requestFormat === FORMATS.OPENAI_RESPONSES && supportsAzureResponsesV1(credentials)) {
+      return transformed;
+    }
 
     // Azure OpenAI strictly rejects vendor/Anthropic thinking parameters
     delete transformed.thinking;
