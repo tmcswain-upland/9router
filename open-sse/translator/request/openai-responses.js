@@ -422,6 +422,17 @@ export function openaiToOpenAIResponsesRequest(model, body, stream, credentials)
   if (body.reasoning_effort !== undefined) result.reasoning = { effort: body.reasoning_effort, summary: "auto" };
   if (body.service_tier !== undefined) result.service_tier = body.service_tier;
   if (body.prompt_cache_key !== undefined) result.prompt_cache_key = body.prompt_cache_key;
+  if (body.response_format?.type === "json_schema" && body.response_format.json_schema) {
+    const { name, strict, schema } = body.response_format.json_schema;
+    result.text = {
+      format: {
+        type: "json_schema",
+        name,
+        strict,
+        schema
+      }
+    };
+  }
 
   return result;
 }
