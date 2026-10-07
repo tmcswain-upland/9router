@@ -12,6 +12,7 @@ vi.mock("@/lib/usageDb.js", () => ({
   trackPendingRequest: vi.fn(),
   appendRequestLog: vi.fn(async () => {}),
   saveRequestDetail: vi.fn(async () => {}),
+  saveRequestUsage: vi.fn(async () => {}),
 }));
 
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.js");
@@ -66,6 +67,28 @@ async function runAzureResponses(body) {
 describe("Azure native Responses API v1", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("preserves explicit high effort and structured output for Azure Sol Chat Completions", async () => {
+    proxyAwareFetchMock.mockResolvedValue(new Response(JSON.stringify({
+      id: "chat_sol", object: "chat.completion", model: "gpt-6.1-sol",
+      choices: [{ index: 0, message: { role: "assistant", content: '{"answer":"ok"}' }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const responseFormat = { type: "json_schema", json_schema: {
+      name: "probe", strict: true, schema: { type: "object", properties: { answer: { type: "string" } }, required: ["answer"], additionalProperties: false },
+    } };
+    const result = await handleChatCore({
+      body: { model: "gpt-6.1-sol", messages: [{ role: "user", content: "Return ok" }], reasoning_effort: "high", response_format: responseFormat, stream: false },
+      modelInfo: { provider: "azure", model: "gpt-6.1-sol" },
+      credentials: { ...makeCredentials(), providerSpecificData: { azureEndpoint: `${endpoint}/openai/v1`, deployment: "gpt-6.1-sol", apiVersion: "v1" } },
+      log: makeLog(), connectionId: "azure-test-connection", sourceFormatOverride: "openai",
+      rtkEnabled: false, headroomEnabled: false, cavemanEnabled: false, ponytailEnabled: false, pxpipeEnabled: false,
+    });
+    expect(result.success).toBe(true);
+    const sentBody = JSON.parse(proxyAwareFetchMock.mock.calls[0][1].body);
+    expect(sentBody.reasoning_effort).toBe("high");
+    expect(sentBody.response_format).toEqual(responseFormat);
   });
 
   it("sends text.verbosity and other Responses fields natively to /openai/v1/responses", async () => {
